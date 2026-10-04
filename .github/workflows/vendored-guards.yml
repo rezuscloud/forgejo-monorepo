@@ -1,15 +1,16 @@
 name: vendored-guards
 
-# Rot detection for vendored upstream trees (runner/, charts/forgejo). Guards
-# with one shared severity rule — RED means something automation should have
-# already fixed, WARN means policy-gated manual action:
+# Rot detection for vendored upstream trees (runner/, charts/forgejo-monorepo).
+# Guards with one shared severity rule — RED means something automation should
+# have already fixed, WARN means policy-gated manual action:
 #
 #   pristine    runner/ must be byte-identical to the upstream archive at the
-#               tag in runners/RUNNER_UPSTREAM (hack/sync-runner.sh writes both).
-#               RED = unaccounted local edits (re-sync is mechanical).
-#   chart       charts/forgejo must differ from the upstream chart at the pin
-#               (charts/forgejo.rezuscloud/UPSTREAM_CHART) by EXACTLY the
-#               contract in charts/forgejo.rezuscloud/PATCHES.yaml (declared
+#               tag in runners/RUNNER_UPSTREAM (the vendor-bump workflow
+#               writes both). RED = unaccounted local edits (re-sync is
+#               mechanical).
+#   chart       charts/forgejo-monorepo must differ from the upstream chart
+#               at the pin (charts/forgejo-monorepo/UPSTREAM_CHART) by EXACTLY
+#               the contract in charts/forgejo-monorepo/PATCHES.yaml (declared
 #               preserve paths + signed patches; helm lint/template sanity).
 #               RED = unaccounted drift; WARN = stale contract entry.
 #   govulncheck symbol-level CVE scan of the runner module. Findings are WARN:
@@ -19,7 +20,9 @@ name: vendored-guards
 #               minor line sat unreleased past the window (patch bumps are auto).
 #               WARN = minor/major ahead (manual/evaluation per policy).
 #
-# A tool failure is never masked as WARN — broken guards fail red.
+# Guard logic lives inline in this workflow (native CI surface — no repo-side
+# script folder). A tool failure is never masked as WARN — broken guards fail
+# red.
 
 on:
   push:
@@ -27,19 +30,13 @@ on:
     paths:
       - 'runner/**'
       - 'runners/**'
-      - 'charts/forgejo/**'
-      - 'charts/forgejo.rezuscloud/**'
-      - 'hack/check-runner-*.sh'
-      - 'hack/check-chart-patches.sh'
+      - 'charts/forgejo-monorepo/**'
       - '.github/workflows/vendored-guards.yml'
   pull_request:
     paths:
       - 'runner/**'
       - 'runners/**'
-      - 'charts/forgejo/**'
-      - 'charts/forgejo.rezuscloud/**'
-      - 'hack/check-runner-*.sh'
-      - 'hack/check-chart-patches.sh'
+      - 'charts/forgejo-monorepo/**'
       - '.github/workflows/vendored-guards.yml'
   schedule:
     - cron: '23 4 * * *'   # daily: lag
@@ -69,10 +66,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Pristine check
-        run: hack/check-runner-pristine.sh
+        run: |
+          set -euo pipefail
+          PIN_FILE="runners/RUNNER_UPSTREAM"
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
+          PIN="$(tail -n1 "$PIN_FILE" | tr -d '[:space:]')"
+          [[ "$PIN" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::pin '$PIN' is not a vX.Y.Z tag"; exit 1; }
+          echo "· fetching code.forgejo.org/forgejo/runner at $PIN"
+          curl -fsSL "https://code.forgejo.org/forgejo/runner/archive/${PIN}.tar.gz" -o "$TMP/src.tar.gz"
+          tar -xzf "$TMP/src.tar.gz" -C "$TMP"
+          SRC_DIR="$(echo "$TMP/runner"*)"
+          echo "· diffing runner/ against upstream $PIN"
+          # --strip-trailing-cr: this repo normalizes CRLF→LF at commit time (git
+          # text=auto), so ~a dozen upstream CRLF files differ by EOL policy only.
+          # The guard exists for CONTENT drift, not the repo's EOL policy.
+          if diff -r --strip-trailing-cr "$SRC_DIR" runner; then
+            echo "✓ runner/ is byte-pristine at $PIN"
+          else
+            echo ""
+            echo "✗ runner/ drifted from upstream $PIN — unaccounted local edits" >&2
+            echo "  fix: vendor-bump workflow (component: runner, same version) re-syncs," >&2
+            echo "  or move the logic into .github/workflows/ — the vendored tree stays pristine." >&2
+            exit 1
+          fi
 
   chart:
-    name: charts/forgejo patches vs pin
+    name: charts/forgejo-monorepo patches vs pin
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: >-
@@ -81,7 +101,85 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Chart patch-accounting
-        run: hack/check-chart-patches.sh
+        run: |
+          set -euo pipefail
+          # Verifies that the diff between charts/forgejo-monorepo and the
+          # upstream chart at the pinned version is EXACTLY the contract in
+          # charts/forgejo-monorepo/PATCHES.yaml:
+          #   preserve  locally-added paths must be declared; anything else = RED
+          #   patches   differing files must be declared AND carry their signature;
+          #             missing signature or undeclared diff = RED; a declared patch
+          #             that no longer differs = WARN (stale entry)
+          #   missing   an upstream path absent locally = RED (deletions are not modeled)
+          # Then sanity-renders the chart: helm lint + helm template (default values).
+          CHART_DIR="charts/forgejo-monorepo"
+          PIN_FILE="$CHART_DIR/UPSTREAM_CHART"
+          CONTRACT="$CHART_DIR/PATCHES.yaml"
+          UPSTREAM_OCI="${UPSTREAM_OCI:-oci://code.forgejo.org/forgejo-helm/forgejo}"
+          PIN="$(awk 'NF && $0 !~ /^[[:space:]]*#/ {v=$0} END {print v}' "$PIN_FILE" | tr -d '[:space:]')"
+          [[ -n "$PIN" ]] || { echo "::error::no pin in $PIN_FILE"; exit 1; }
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
+          echo "· pulling $UPSTREAM_OCI at pin $PIN"
+          HELM_FLAGS=()
+          [ "${HELM_PLAIN_HTTP:-0}" = "1" ] && HELM_FLAGS+=(--plain-http)
+          helm pull "$UPSTREAM_OCI" --version "$PIN" --untar --untardir "$TMP" "${HELM_FLAGS[@]}" \
+            || { echo "::error::helm pull $UPSTREAM_OCI:$PIN failed (registry down? pin pulled?)"; exit 1; }
+          SRC_DIR="$(find "$TMP" -mindepth 1 -maxdepth 1 -type d | head -1)"
+          red=0
+          warn=0
+          while IFS= read -r d; do
+            case "$d" in
+              "Files $SRC_DIR"*)
+                rel="$(echo "$d" | sed -E "s#^Files $SRC_DIR/(.*) and .*#\1#")"
+                sig="$(yq -r ".patches[] | select(.path == \"$rel\") | .signature" "$CONTRACT" 2>/dev/null)"
+                if [ -z "$sig" ] || [ "$sig" = "null" ]; then
+                  echo "::error::$rel differs from upstream $PIN and is not in PATCHES.yaml — re-vendor via the vendor-bump workflow (chart) or declare the patch"
+                  red=1
+                elif ! grep -qF -- "$sig" "$CHART_DIR/$rel" 2>/dev/null; then
+                  echo "::error::$rel differs but signature '$sig' not found — patch unaccounted (rebased away?)"
+                  red=1
+                else
+                  echo "✓ patch: $rel (signature present)"
+                fi
+                ;;
+              "Only in $CHART_DIR"*)
+                rel="$(echo "$d" | sed -E "s#^Only in $CHART_DIR/?(.*): (.*)#\1/\2#" | sed 's#^/##')"
+                if yq -r '.preserve[]' "$CONTRACT" 2>/dev/null | grep -qxF "${rel%%/*}/" \
+                   || yq -r '.preserve[]' "$CONTRACT" 2>/dev/null | grep -qxF "$rel"; then
+                  echo "✓ preserve: $rel (declared)"
+                else
+                  echo "::error::$rel exists only locally and is not in PATCHES.yaml preserve — declare it or drop it"
+                  red=1
+                fi
+                ;;
+              "Only in $SRC_DIR"*)
+                rel="$(echo "$d" | sed -E "s#^Only in $SRC_DIR/?(.*): (.*)#\1/\2#" | sed 's#^/##')"
+                echo "::error::$rel exists upstream $PIN but is missing locally — deletions are not modeled; re-vendor"
+                red=1
+                ;;
+            esac
+          done < <(diff -rq --strip-trailing-cr "$SRC_DIR" "$CHART_DIR" 2>/dev/null || true)
+          while IFS= read -r e; do
+            [ -z "$e" ] && continue
+            [ -e "$CHART_DIR/$e" ] || { echo "::error::preserve entry $e missing from $CHART_DIR — a vanished preserved file is invisible to the diff"; red=1; }
+          done < <(yq -r '.preserve[]' "$CONTRACT" 2>/dev/null)
+          while IFS= read -r p; do
+            [ -z "$p" ] && continue
+            if [ ! -e "$CHART_DIR/$p" ]; then
+              echo "::error::patch entry $p missing from $CHART_DIR"
+              red=1
+            elif diff -q --strip-trailing-cr "$SRC_DIR/$p" "$CHART_DIR/$p" >/dev/null 2>&1; then
+              echo "::warning::$p is byte-identical to upstream $PIN — stale PATCHES.yaml entry (upstream absorbed the patch?)"
+              warn=1
+            fi
+          done < <(yq -r '.patches[].path' "$CONTRACT" 2>/dev/null)
+          [ "$red" = "1" ] && { echo "::error::patch-accounting RED — unaccounted differences in $CHART_DIR vs upstream $PIN"; exit 1; }
+          echo "· helm lint + template (the patched chart must render)"
+          helm lint "$CHART_DIR" >/dev/null || { echo "::error::helm lint failed"; exit 1; }
+          helm template forgejo "$CHART_DIR" "${HELM_FLAGS[@]}" >/dev/null || { echo "::error::helm template failed"; exit 1; }
+          echo "✓ chart patch-accounting green vs upstream $PIN (${warn} stale warnings)"
+          exit 0
 
   govulncheck:
     name: runner/ govulncheck (advisory)
@@ -121,4 +219,77 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Lag check
-        run: hack/check-runner-lag.sh
+        env:
+          LAG_DAYS: ${{ vars.RUNNER_LAG_DAYS || '14' }}
+        run: |
+          set -euo pipefail
+          # Compares runners/RUNNER_UPSTREAM against upstream tags on
+          # code.forgejo.org. RED = a patch release in the vendored
+          # <major>.<minor> line is older than the window and the pin wasn't
+          # bumped (patch-class bumps are auto per the bump policy matrix).
+          # WARN = minor/major ahead (manual/evaluation per policy).
+          PIN_FILE="runners/RUNNER_UPSTREAM"
+          API="https://code.forgejo.org/api/v1/repos/forgejo/runner"
+          PIN="$(tail -n1 "$PIN_FILE" | tr -d '[:space:]')"
+          [[ "$PIN" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::pin '$PIN' is not a vX.Y.Z tag"; exit 1; }
+          export PIN API LAG_DAYS
+          python3 <<'PY'
+          import json, os, re, sys, urllib.request
+          from datetime import datetime, timezone
+
+          pin, api, lag_days = os.environ["PIN"], os.environ["API"], int(os.environ["LAG_DAYS"])
+          tag_re = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+
+          def get(url):
+              with urllib.request.urlopen(url, timeout=30) as r:
+                  return json.load(r)
+
+          tags = {}
+          page = 1
+          while True:
+              batch = get(f"{api}/tags?limit=50&page={page}")
+              for t in batch:
+                  m = tag_re.match(t["name"])
+                  if m:
+                      tags[t["name"]] = (tuple(map(int, m.groups())), t["commit"]["sha"])
+              if len(batch) < 50:
+                  break
+              page += 1
+          if not tags:
+              print("ERROR: no vX.Y.Z tags found upstream — API change or network issue", file=sys.stderr)
+              sys.exit(1)
+
+          pmajor, pminor, _ = next(v[0] for name, v in tags.items() if name == pin)
+          patch_latest = max((v for v in tags.values() if v[0][:2] == (pmajor, pminor)), default=None)
+          minor_ahead = sorted(v[0] for v in tags.values() if v[0][0] == pmajor and v[0][1] > pminor)
+          major_ahead = sorted(v[0] for v in tags.values() if v[0][0] > pmajor)
+
+          def age_days(sha):
+              created = get(f"{api}/git/commits/{sha}")["created"]
+              dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+              return (datetime.now(timezone.utc) - dt).days
+
+          if minor_ahead:
+              latest = "v" + ".".join(map(str, minor_ahead[-1]))
+              n = len(minor_ahead)
+              print(f"WARN: upstream minor releases ahead of pin {pin}: latest {latest} ({n} tag(s)) — policy: minor bump = manual review")
+          if major_ahead:
+              latest = "v" + ".".join(map(str, major_ahead[-1]))
+              n = len(major_ahead)
+              print(f"WARN: upstream major releases ahead of pin {pin}: latest {latest} ({n} tag(s)) — policy: major bump = evaluation")
+
+          # red tier: patch-lane lag beyond the window
+          patch_ver = "v" + ".".join(map(str, patch_latest[0])) if patch_latest else None
+          if patch_ver == pin:
+              print(f"✓ pin {pin} is the latest patch of the v{pmajor}.{pminor} line")
+          elif patch_ver is not None:
+              age = age_days(patch_latest[1])
+              if age > lag_days:
+                  print(f"RED: v{pmajor}.{pminor} line has patch {patch_ver} ({age}d old, window {lag_days}d) "
+                        f"and pin is {pin} — patch bumps are auto", file=sys.stderr)
+                  print(f"  fix: vendor-bump workflow (component: runner, version: {patch_ver})", file=sys.stderr)
+                  sys.exit(1)
+              print(f"✓ patch lag within window: {patch_ver} released {age}d ago (window {lag_days}d), pin {pin}")
+          else:
+              print(f"✓ pin {pin}: no patch releases in the v{pmajor}.{pminor} line")
+          PY

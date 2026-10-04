@@ -17,8 +17,8 @@ build action, so no macOS assets exist at any upstream version.
 ## Binary source
 
 The runner source is **vendored pristine upstream** at `runner/` (pinned tag in
-`runners/RUNNER_UPSTREAM`, bumped by `hack/sync-runner.sh` — the
-`charts/forgejo` pattern). Upstream ships linux-only release binaries, so the
+`runners/RUNNER_UPSTREAM`, bumped by the vendor-bump workflow — the
+`charts/forgejo-monorepo` pattern). Upstream ships linux-only release binaries, so the
 monorepo's `release.yml` builds the darwin pair on every `v*-rezus.*` tag and
 attaches versionless assets (`forgejo-runner-{goos}-{goarch}.tar.gz` + bare-name
 `.sha256` + `checksums.txt`) next to the fj binaries. The binary stamps its own
@@ -66,7 +66,7 @@ The vendored `runner/` tree is maintained by the fork-maintenance engine
 operating knowledge lives in the fork-maintenance skill — vendored-tree
 mode section, incl. the four maintenance shapes and the onboarding
 recipe). The pin lives in
-`runners/RUNNER_UPSTREAM`; propagation is delegated to `hack/sync-runner.sh`
+`runners/RUNNER_UPSTREAM`; propagation is delegated to the vendor-bump workflow
 and byte-verified against the upstream archive (pristine gate). How a newer
 upstream tag is handled depends on its class **relative to the pin**:
 

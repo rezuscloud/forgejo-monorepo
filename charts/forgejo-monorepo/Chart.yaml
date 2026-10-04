@@ -22,7 +22,7 @@ maintainers:
   name: Michael Kriese
 - email: mail@pat-s.me
   name: Patrick Schratz
-name: forgejo
+name: forgejo-monorepo
 sources:
 - https://code.forgejo.org/forgejo-helm/forgejo-helm
 - https://codeberg.org/forgejo/forgejo

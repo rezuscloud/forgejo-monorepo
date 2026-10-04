@@ -17,7 +17,7 @@ set -euo pipefail
 # ── pinned inputs ────────────────────────────────────────────────────────────
 # Binaries ship with the monorepo release (rezuscloud/forgejo): asset
 # forgejo-runner-darwin-arm64.tar.gz on tag v<release>, binary stamped
-# <upstream>-rezus.<N>. Bump the vendored tree via hack/sync-runner.sh.
+# <upstream>-rezus.<N>. Bump the vendored tree via the vendor-bump workflow.
 RELEASE_TAG="v16.0.2-rezus.1"     # monorepo release tag carrying the assets
 RUNNER_UPSTREAM="v12.7.3"         # expected runner lineage; see runners/RUNNER_UPSTREAM
 FORGEJO_URL="https://git.rezus.cloud"

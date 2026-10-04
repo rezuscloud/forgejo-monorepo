@@ -29,7 +29,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Vendored runner builds and reports its stamp
-        # runner/ is pristine upstream (hack/sync-runner.sh); CI asserts it
+        # runner/ is pristine upstream (vendor-bump workflow); CI asserts it
         # compiles from the tree and carries the pinned lineage so packaging
         # drift (module path moves, ver package renames) fails fast here.
         run: |

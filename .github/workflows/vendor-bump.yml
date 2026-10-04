@@ -1,0 +1,171 @@
+name: vendor-bump
+
+# Native replacement for the retired repo-side sync scripts (no hack/ folder):
+# re-vendors an upstream tree and opens a PR. Dispatch it from the Actions
+# tab (or via `gh workflow run vendor-bump.yml -f component=chart -f version=X.Y.Z`).
+#
+#   chart   : pulls the upstream forgejo-helm chart at <version> (X.Y.Z) into
+#             charts/forgejo-monorepo, restoring the preserve-list
+#             (PATCHES.yaml, UPSTREAM_CHART, REZUSCLOUD.md,
+#             values-rc-testing.yaml, charts/ deps) and re-applying the
+#             declared patches (Chart.yaml identity, values.yaml image
+#             default + header). Local chart version/appVersion are carried
+#             across the swap (chart N+2 → app N, set at release time).
+#   runner  : pulls the forgejo/runner tree at <version> (vX.Y.Z) into
+#             runner/ — byte-pristine, build-verified — and updates
+#             runners/RUNNER_UPSTREAM.
+#
+# After merge, vendored-guards (chart/pristine) must be green — the PR runs it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: 'Which vendored tree to bump (chart | runner)'
+        required: true
+        type: choice
+        options: [chart, runner]
+      version:
+        description: 'Upstream version (chart: X.Y.Z — runner: vX.Y.Z)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: vendor-bump-${{ inputs.component }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: vendor ${{ inputs.component }} @ ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      COMPONENT: ${{ inputs.component }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with: { version: "v3.16.0" }
+        if: inputs.component == 'chart'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: runner/go.mod
+        if: inputs.component == 'runner'
+      - name: Vendor
+        run: |
+          set -euo pipefail
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
+
+          if [ "$COMPONENT" = chart ]; then
+            [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::chart version '$VERSION' is not X.Y.Z"; exit 1; }
+            CHART_DIR="charts/forgejo-monorepo"
+            UPSTREAM_OCI="${UPSTREAM_OCI:-oci://code.forgejo.org/forgejo-helm/forgejo}"
+
+            # Preserve the local release-line identity + the preserve-list
+            # across the swap (the swap below rm -rf's the chart dir).
+            CHART_VERSION="$(yq -r '.version' "$CHART_DIR/Chart.yaml" | tr -d '"')"
+            APP_VERSION="$(yq -r '.appVersion' "$CHART_DIR/Chart.yaml" | tr -d '"')"
+            CHART_VERSION="${CHART_VERSION_OVERRIDE:-$CHART_VERSION}"
+            APP_VERSION="${APP_VERSION_OVERRIDE:-$APP_VERSION}"
+            mkdir -p "$TMP/keep"
+            for f in PATCHES.yaml UPSTREAM_CHART REZUSCLOUD.md values-rc-testing.yaml; do
+              [ -f "$CHART_DIR/$f" ] && cp "$CHART_DIR/$f" "$TMP/keep/"
+            done
+            mkdir -p "$TMP/deps"
+            [ -d "$CHART_DIR/charts" ] && cp "$CHART_DIR"/charts/*.tgz "$TMP/deps/" 2>/dev/null || true
+
+            echo "· vendoring $UPSTREAM_OCI at $VERSION (local chart $CHART_VERSION / app $APP_VERSION)"
+            helm pull "$UPSTREAM_OCI" --version "$VERSION" --untar --untardir "$TMP" \
+              || helm pull "$UPSTREAM_OCI" --version "$VERSION" --untar --untardir "$TMP" --plain-http
+
+            rm -rf "$CHART_DIR"
+            cp -a "$TMP/forgejo" "$CHART_DIR"
+            cp "$TMP/keep/"* "$CHART_DIR/"
+            mkdir -p "$CHART_DIR/charts"
+            for t in "$TMP/deps/"*.tgz; do [ -e "$t" ] && cp "$t" "$CHART_DIR/charts/"; done
+
+            CHART_DIR="$CHART_DIR" APP_VERSION="$APP_VERSION" CHART_VERSION="$CHART_VERSION" python3 <<'PY'
+          import os, re
+          from pathlib import Path
+
+          d = Path(os.environ["CHART_DIR"])
+          chart, values = d / "Chart.yaml", d / "values.yaml"
+          c = chart.read_text()
+          c = re.sub(r"^name: .*$", "name: forgejo-monorepo", c, count=1, flags=re.M)
+          c = re.sub(r"^appVersion: .*$", "appVersion: " + os.environ["APP_VERSION"], c, count=1, flags=re.M)
+          c = re.sub(r"^version: .*$", "version: " + os.environ["CHART_VERSION"], c, count=1, flags=re.M)
+          c = c.replace(
+              "- https://codeberg.org/forgejo/forgejo\ntype: application",
+              "- https://codeberg.org/forgejo/forgejo\n"
+              "- https://github.com/rezuscloud/forgejo-monorepo\ntype: application",
+          )
+          chart.write_text(c)
+
+          v = values.read_text()
+          v = v.replace(
+              "# Default values for gitea.\n",
+              "# Default values for Forgejo.\n"
+              "# Vendored from the upstream forgejo-helm chart (pin: charts/forgejo-monorepo/UPSTREAM_CHART)\n"
+              "# and patched per charts/forgejo-monorepo/PATCHES.yaml — keep local changes minimal\n"
+              "# and declared there.\n",
+          )
+          v = v.replace("registry: code.forgejo.org", "registry: ghcr.io")
+          v = v.replace("repository: forgejo/forgejo", "repository: rezuscloud/forgejo")
+          v = v.replace(
+              "## @param image.tag Visit: [Image tag](https://code.forgejo.org/forgejo/-/packages/container/forgejo/versions). Defaults to `appVersion` within Chart.yaml.\n",
+              "## @param image.tag Custom Rezuscloud Forgejo image tag. Defaults to `appVersion` within Chart.yaml.\n",
+          )
+          values.write_text(v)
+          PY
+
+            printf '# Upstream forgejo-helm chart version vendored as the base of charts/forgejo-monorepo/\n# (the vendor-bump workflow bumps it; PATCHES.yaml declares the allowed delta).\n%s\n' \
+              "$VERSION" > "$CHART_DIR/UPSTREAM_CHART"
+
+            echo "· helm lint (sanity — patches must leave a working chart)"
+            helm lint "$CHART_DIR" >/dev/null
+            echo "✓ chart vendored at upstream $VERSION (local chart $CHART_VERSION / app $APP_VERSION)"
+
+          elif [ "$COMPONENT" = runner ]; then
+            [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::runner version '$VERSION' is not vX.Y.Z"; exit 1; }
+            RUNNER_DIR="runner"
+            PIN_FILE="runners/RUNNER_UPSTREAM"
+            echo "· fetching code.forgejo.org/forgejo/runner at $VERSION"
+            curl -fsSL "https://code.forgejo.org/forgejo/runner/archive/${VERSION}.tar.gz" -o "$TMP/src.tar.gz"
+            tar -xzf "$TMP/src.tar.gz" -C "$TMP"
+            SRC_DIR="$(echo "$TMP/runner"*)"
+            # sanity: it builds before we vendor it
+            ( cd "$SRC_DIR" && CGO_ENABLED=0 go build -o "$TMP/forgejo-runner" . )
+            "$TMP/forgejo-runner" --version
+            rm -rf "$RUNNER_DIR"
+            mkdir -p "$RUNNER_DIR"
+            rsync -a --exclude '.git' "$SRC_DIR/" "$RUNNER_DIR/"
+            printf '# Upstream forgejo/runner tag vendored at runner/ (the vendor-bump workflow bumps it).\n# The release stamps binaries <this>-rezus.<N>; keep in lockstep with the k8s fleet.\n%s\n' \
+              "$VERSION" > "$PIN_FILE"
+            echo "✓ runner/ vendored at $VERSION — pin updated, build + --version verified"
+
+          else
+            echo "::error::unknown component '$COMPONENT'"; exit 1
+          fi
+      - name: Open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BRANCH="vendor/${COMPONENT}-${VERSION}"
+          git config user.name "rezuscloud-bot"
+          git config user.email "noreply@rezus.cloud"
+          git checkout -b "$BRANCH"
+          git add -A -f charts/forgejo-monorepo runner runners/RUNNER_UPSTREAM 2>/dev/null || git add -A
+          git commit -m "vendor: ${COMPONENT} @ ${VERSION}
+
+          Re-vendored by the vendor-bump workflow; vendored-guards (chart/pristine)
+          runs on this PR and must be green before merge."
+          git push origin "$BRANCH"
+          gh pr create --base rezus/forgejo-16 --head "$BRANCH" \
+            --title "vendor: ${COMPONENT} @ ${VERSION}" \
+            --body "Re-vendored by the vendor-bump workflow. The chart patch-accounting / runner pristine guards run on this PR and must be green."
