@@ -1,3 +1,0 @@
-# Upstream forgejo-helm chart version vendored at charts/forgejo/
-# (hack/sync-forgejo-chart.sh bumps it; PATCHES.yaml declares the allowed delta).
-17.1.1

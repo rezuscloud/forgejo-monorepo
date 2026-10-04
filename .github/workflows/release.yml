@@ -5,7 +5,7 @@ name: release
 # This repo IS the Forgejo fork. It builds and releases as one unit:
 #   - server image  : built from the repo root via Dockerfile / Dockerfile.rootless
 #   - fj CLI binary : built from ./cmd/fj (the fj analogue of cmd/kubectl)
-#   - Helm chart    : packaged from charts/forgejo (vendored upstream + Rezuscloud overlay)
+#   - Helm chart    : packaged from charts/forgejo-monorepo (vendored upstream + Rezuscloud overlay)
 #
 # VERSION IDENTITY (no hand-edited files, no hand-bumped counters):
 #   identity   = the upstream version the release is based on (16.0.2)
@@ -69,7 +69,7 @@ jobs:
           rest="${identity#*.}"
           chart_version="$((major + 2)).${rest}-rezus.${n}"
           short_sha="$(git rev-parse --short=12 HEAD)"
-          # vendored forgejo/runner (runner/, hack/sync-runner.sh): the runner
+          # vendored forgejo/runner (runner/, vendor-bump workflow): the runner
           # binaries keep their own version lineage — <upstream tag>-rezus.<N>
           runner_upstream="$(tail -1 runners/RUNNER_UPSTREAM | tr -d '[:space:]')"
           [[ "$runner_upstream" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
@@ -87,7 +87,7 @@ jobs:
             echo "runner_version=$runner_version"
             echo "image_repository=ghcr.io/rezuscloud/forgejo"
             echo "chart_repository=oci://ghcr.io/rezuscloud/charts"
-            echo "chart_archive=forgejo-${chart_version}.tgz"
+            echo "chart_archive=forgejo-monorepo-${chart_version}.tgz"
             echo "short_sha=$short_sha"
           } >> "$GITHUB_OUTPUT"
 
@@ -198,7 +198,7 @@ jobs:
           path: out/
 
   build-runner:
-    # forgejo/runner is vendored pristine at runner/ (hack/sync-runner.sh);
+    # forgejo/runner is vendored pristine at runner/ (vendor-bump workflow);
     # upstream ships linux-only release binaries, so the darwin pair is built
     # here alongside the rest of the release. Versionless asset names (like the
     # fj assets) — the version comes from the release tag; the binary stamps
@@ -290,12 +290,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
         with: { version: "v3.16.0" }
-      - run: helm dependency build charts/forgejo
+      - run: helm dependency build charts/forgejo-monorepo
       - name: Package chart
         run: |
           set -euo pipefail
           mkdir -p dist
-          helm package charts/forgejo \
+          helm package charts/forgejo-monorepo \
             --version '${{ needs.prepare.outputs.chart_version }}' \
             --app-version '${{ needs.prepare.outputs.release_version }}' \
             --destination dist

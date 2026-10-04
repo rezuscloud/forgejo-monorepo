@@ -1,0 +1,3 @@
+# Upstream forgejo-helm chart version vendored as the base of charts/forgejo-monorepo/
+# (the vendor-bump workflow bumps it; PATCHES.yaml declares the allowed delta).
+17.1.1

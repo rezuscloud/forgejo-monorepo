@@ -1,8 +1,7 @@
 # Default values for Forgejo.
-# This chart is vendored from upstream forgejo-helm 17.1.1 and patched by
-# rezuscloud for a Forgejo 16.0.0-rc.1 deployment while the upstream chart
-# still targets Forgejo 15.x. Keep local changes minimal and rebase onto the
-# upstream chart once an official appVersion 16 chart is released.
+# Vendored from the upstream forgejo-helm chart (pin: charts/forgejo-monorepo/UPSTREAM_CHART)
+# and patched per charts/forgejo-monorepo/PATCHES.yaml — keep local changes minimal
+# and declared there.
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 ## @section Global

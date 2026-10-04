@@ -1,24 +1,25 @@
 # =============================================================================
-# Patch contract for the vendored forgejo-helm chart (charts/forgejo)
+# Patch contract for the Rezuscloud chart at charts/forgejo-monorepo/
 # =============================================================================
-# Single source of truth for the ALLOWED delta between the vendored tree and
-# the upstream chart at the version pinned in UPSTREAM_CHART. Read by BOTH:
-#
-#   - the fork-maintenance engine's patch-accounting gate
-#     (k8s-config forks/forgejo-chart.yaml, mode: subtree)
-#   - hack/check-chart-patches.sh (this repo's CI: .github/workflows/vendored-guards.yml)
+# Single source of truth for the ALLOWED delta between this chart and the
+# upstream forgejo-helm chart at the version pinned in UPSTREAM_CHART (same
+# directory). Read by the patch-accounting guard that runs inline in
+# .github/workflows/vendored-guards.yml.
 #
 # Rule: every difference must be declared here. A differing file that is not
 # listed, or a listed file whose signature is absent, is RED (unaccounted
-# drift — re-sync is mechanical). A declared patch that no longer differs is a
-# WARN (stale entry: upstream absorbed it, or the patch was dropped — resolve).
-# Locally-added paths must be preserved; upstream paths must never go missing.
+# drift — re-vendor via the vendor-bump workflow). A declared patch that no
+# longer differs is a WARN (stale entry: upstream absorbed it, or the patch
+# was dropped — resolve). Locally-added paths must be preserved; upstream
+# paths must never go missing.
 # =============================================================================
 
 # Locally-added paths (exact file at the chart root, or a directory with a
-# trailing slash). These survive re-vendoring (hack/sync-forgejo-chart.sh
-# re-copies them; directory contents are backed up across the swap).
+# trailing slash). These survive re-vendoring (the vendor-bump workflow
+# backs them up across the swap; directory contents are restored after).
 preserve:
+  - PATCHES.yaml            # this contract
+  - UPSTREAM_CHART          # the pin this contract is verified against
   - REZUSCLOUD.md           # this distribution's docs (drop-in contract)
   - values-rc-testing.yaml  # RC-channel values overlay
   - charts/                 # vendored dependency tarballs (Chart.lock deps; upstream ships none)
@@ -29,9 +30,9 @@ patches:
   - path: Chart.yaml
     signature: github.com/rezuscloud/forgejo-monorepo
     description: >-
-      home/sources point at the Rezuscloud monorepo; version + appVersion
-      carry the LOCAL release line (chart N+2 → app N, independent of the
-      upstream pin — set by distributions/*.env + forgejo-release.yml).
+      name forgejo-monorepo; home/sources point at the Rezuscloud monorepo;
+      version + appVersion carry the LOCAL release line (chart N+2 → app N,
+      independent of the upstream pin — set by release.yml).
   - path: values.yaml
     signature: rezuscloud/forgejo
     description: >-
