@@ -447,7 +447,6 @@
 	"admin.dashboard.git_gc_repos": "Garbage collect all repositories",
 	"admin.dashboard.resync_all_sshkeys": "Update the \".ssh/authorized_keys\" file with Forgejo SSH keys.",
 	"admin.dashboard.resync_all_sshprincipals": "Update the \".ssh/authorized_principals\" file with Forgejo SSH principals.",
-	"admin.dashboard.resync_all_hooks": "Resynchronize Git hooks of all repositories (pre-receive, update, post-receive, proc-receive, …)",
 	"admin.dashboard.reinit_missing_repos": "Reinitialize all missing Git repositories for which records exist",
 	"admin.dashboard.sync_external_users": "Synchronize external user data",
 	"admin.dashboard.cleanup_hook_task_table": "Clean up hook_task table",
