@@ -7,16 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 
 	actions_model "forgejo.org/models/actions"
+	auth_model "forgejo.org/models/auth"
 	repo_model "forgejo.org/models/repo"
-	unit_model "forgejo.org/models/unit"
 	"forgejo.org/models/unittest"
 	user_model "forgejo.org/models/user"
-	files_service "forgejo.org/services/repository/files"
-	"forgejo.org/tests"
+	"forgejo.org/modules/setting"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,29 +25,34 @@ import (
 // links carry the index, but the API and DB expose the ID, and numbers
 // pasted from those surfaces 404'd before (#132, #136).
 func TestActionsWebRouteRunIDFallback(t *testing.T) {
+	if !setting.Database.Type.IsSQLite3() {
+		t.Skip()
+	}
 	onApplicationRun(t, func(t *testing.T, u *url.URL) {
 		user2 := unittest.AssertExistsAndLoadBean(t, &user_model.User{ID: 2})
+		session := loginUser(t, user2.Name)
+		token := getTokenForLoggedInUser(t, session,
+			auth_model.AccessTokenScopeWriteRepository,
+			auth_model.AccessTokenScopeWriteUser,
+		)
 
-		// two repos with one run each: distinct indexes AND distinct run IDs
-		newRepo := func(name string) (*repo_model.Repository, func()) {
-			repo, _, f := tests.CreateDeclarativeRepo(t, user2, name,
-				[]unit_model.Type{unit_model.TypeActions}, nil,
-				[]*files_service.ChangeRepoFile{
-					{
-						Operation:     "create",
-						TreePath:      ".gitea/workflows/pr.yml",
-						ContentReader: strings.NewReader("name: test\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo helloworld\n"),
-					},
-				},
-			)
+		// two repos with one run each: distinct indexes AND distinct run IDs.
+		// No runner is registered — pushing the workflow file creates the run,
+		// which stays queued; that is all this test needs.
+		newRepo := func(name string) *repo_model.Repository {
+			apiRepo := createActionsTestRepo(t, token, name, false)
+			repo := unittest.AssertExistsAndLoadBean(t, &repo_model.Repository{ID: apiRepo.ID})
+			treePath := ".gitea/workflows/pr.yml"
+			opts := getWorkflowCreateFileOptions(user2, repo.DefaultBranch,
+				fmt.Sprintf("create %s", treePath),
+				"name: test\non:\n  push:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo helloworld\n")
+			createWorkflowFile(t, token, user2.Name, repo.Name, treePath, opts)
 			assert.Equal(t, 1, unittest.GetCount(t, &actions_model.ActionRun{RepoID: repo.ID}))
-			return repo, f
+			return repo
 		}
 
-		repo, f1 := newRepo("actionsRunIDFallback1")
-		defer f1()
-		otherRepo, f2 := newRepo("actionsRunIDFallback2")
-		defer f2()
+		repo := newRepo("actionsRunIDFallback1")
+		otherRepo := newRepo("actionsRunIDFallback2")
 
 		run := unittest.AssertExistsAndLoadBean(t, &actions_model.ActionRun{RepoID: repo.ID})
 		require.NoError(t, run.LoadAttributes(t.Context()))

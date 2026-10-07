@@ -365,6 +365,54 @@ func (s *RepoService) ListActionWorkflows(ctx context.Context, owner string, rep
 	return &result, &Response{Response: resp}, nil
 }
 
+// RerunActionJob — Rerun a single job of a workflow run
+// POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun
+func (s *RepoService) RerunActionJob(ctx context.Context, owner string, repo string, jobId int64) (*Response, error) {
+	u := s.client.base.JoinPath(fmt.Sprintf("/repos/%s/%s/actions/jobs/%d/rerun", owner, repo, jobId))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
+	if err != nil { return nil, fmt.Errorf("request: %w", err) }
+
+	resp, err := s.client.client.Do(req)
+	if err != nil { return nil, fmt.Errorf("do: %w", err) }
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 { return nil, handleError(resp) }
+
+	return &Response{Response: resp}, nil
+}
+
+// RerunActionRun — Rerun all jobs of a workflow run
+// POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun
+func (s *RepoService) RerunActionRun(ctx context.Context, owner string, repo string, runId int64) (*Response, error) {
+	u := s.client.base.JoinPath(fmt.Sprintf("/repos/%s/%s/actions/runs/%d/rerun", owner, repo, runId))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
+	if err != nil { return nil, fmt.Errorf("request: %w", err) }
+
+	resp, err := s.client.client.Do(req)
+	if err != nil { return nil, fmt.Errorf("do: %w", err) }
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 { return nil, handleError(resp) }
+
+	return &Response{Response: resp}, nil
+}
+
+// RerunFailedActionRun — Rerun the failed jobs of a workflow run
+// POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun-failed
+func (s *RepoService) RerunFailedActionRun(ctx context.Context, owner string, repo string, runId int64) (*Response, error) {
+	u := s.client.base.JoinPath(fmt.Sprintf("/repos/%s/%s/actions/runs/%d/rerun-failed", owner, repo, runId))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
+	if err != nil { return nil, fmt.Errorf("request: %w", err) }
+
+	resp, err := s.client.client.Do(req)
+	if err != nil { return nil, fmt.Errorf("do: %w", err) }
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 { return nil, handleError(resp) }
+
+	return &Response{Response: resp}, nil
+}
+
 // AcceptRepoTransfer — Accept a repo transfer
 // POST /repos/{owner}/{repo}/transfer/accept
 func (s *RepoService) AcceptRepoTransfer(ctx context.Context, owner string, repo string) (*Response, error) {

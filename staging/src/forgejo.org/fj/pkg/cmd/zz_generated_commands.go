@@ -4571,6 +4571,66 @@ actions, etc.) instead.`,
 		_ = mc.MarkFlagRequired("repo")
 		svcCmd.AddCommand(mc)
 		}
+		{ // POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun -> Repo.RerunActionJob
+		mc := &cobra.Command{Use: "rerun-action-job", Short: "Rerun a single job of a workflow run"}
+		var rerunactionjob_owner string
+		mc.Flags().StringVar(&rerunactionjob_owner, "owner", "", "owner")
+		var rerunactionjob_repo string
+		mc.Flags().StringVar(&rerunactionjob_repo, "repo", "", "repo")
+		var rerunactionjob_jobId int64
+		mc.Flags().Int64Var(&rerunactionjob_jobId, "job-id", 0, "job-id")
+		mc.RunE = func(cmd *cobra.Command, args []string) error {
+			cli, e := resolveHostClient(cmd, "")
+			if e != nil { return e }
+			_, err := cli.Repo.RerunActionJob(context.Background(), rerunactionjob_owner, rerunactionjob_repo, rerunactionjob_jobId)
+			if err != nil { return err }
+			return nil
+		}
+		_ = mc.MarkFlagRequired("owner")
+		_ = mc.MarkFlagRequired("repo")
+		_ = mc.MarkFlagRequired("job-id")
+		svcCmd.AddCommand(mc)
+		}
+		{ // POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun -> Repo.RerunActionRun
+		mc := &cobra.Command{Use: "rerun-action-run", Short: "Rerun all jobs of a workflow run"}
+		var rerunactionrun_owner string
+		mc.Flags().StringVar(&rerunactionrun_owner, "owner", "", "owner")
+		var rerunactionrun_repo string
+		mc.Flags().StringVar(&rerunactionrun_repo, "repo", "", "repo")
+		var rerunactionrun_runId int64
+		mc.Flags().Int64Var(&rerunactionrun_runId, "run-id", 0, "run-id")
+		mc.RunE = func(cmd *cobra.Command, args []string) error {
+			cli, e := resolveHostClient(cmd, "")
+			if e != nil { return e }
+			_, err := cli.Repo.RerunActionRun(context.Background(), rerunactionrun_owner, rerunactionrun_repo, rerunactionrun_runId)
+			if err != nil { return err }
+			return nil
+		}
+		_ = mc.MarkFlagRequired("owner")
+		_ = mc.MarkFlagRequired("repo")
+		_ = mc.MarkFlagRequired("run-id")
+		svcCmd.AddCommand(mc)
+		}
+		{ // POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun-failed -> Repo.RerunFailedActionRun
+		mc := &cobra.Command{Use: "rerun-failed-action-run", Short: "Rerun the failed jobs of a workflow run"}
+		var rerunfailedactionrun_owner string
+		mc.Flags().StringVar(&rerunfailedactionrun_owner, "owner", "", "owner")
+		var rerunfailedactionrun_repo string
+		mc.Flags().StringVar(&rerunfailedactionrun_repo, "repo", "", "repo")
+		var rerunfailedactionrun_runId int64
+		mc.Flags().Int64Var(&rerunfailedactionrun_runId, "run-id", 0, "run-id")
+		mc.RunE = func(cmd *cobra.Command, args []string) error {
+			cli, e := resolveHostClient(cmd, "")
+			if e != nil { return e }
+			_, err := cli.Repo.RerunFailedActionRun(context.Background(), rerunfailedactionrun_owner, rerunfailedactionrun_repo, rerunfailedactionrun_runId)
+			if err != nil { return err }
+			return nil
+		}
+		_ = mc.MarkFlagRequired("owner")
+		_ = mc.MarkFlagRequired("repo")
+		_ = mc.MarkFlagRequired("run-id")
+		svcCmd.AddCommand(mc)
+		}
 		{ // POST /repos/{owner}/{repo}/transfer/accept -> Repo.AcceptRepoTransfer
 		mc := &cobra.Command{Use: "accept-repo-transfer", Short: "Accept a repo transfer"}
 		var acceptrepotransfer_owner string

@@ -693,6 +693,31 @@ func TestCLICommands(t *testing.T) {
 		if strings.Contains(errOut, "unknown flag") || strings.Contains(errOut, "invalid argument") {
 			t.Fatalf("jobs <index> failed at flag parsing, not at the endpoint: %s", errOut)
 		}
+		// #153: rerun wraps the rerun endpoints — this harness has no
+		// completed run, so the not-found surface proves flag binding and
+		// endpoint reach for all three modes (all jobs via index, failed-only
+		// via index, single job via --job); none may fail at flag parsing.
+		_, errOut, err = runFjFull(t, binary, "actions", "rerun", "1", "-r", ownerRepo)
+		if err == nil {
+			t.Fatalf("expected not-found error for nonexistent run index, got success")
+		}
+		if strings.Contains(errOut, "unknown flag") || strings.Contains(errOut, "invalid argument") {
+			t.Fatalf("rerun <index> failed at flag parsing, not at the endpoint: %s", errOut)
+		}
+		_, errOut, err = runFjFull(t, binary, "actions", "rerun", "1", "--failed-only", "-r", ownerRepo)
+		if err == nil {
+			t.Fatalf("expected not-found error for nonexistent run index (failed-only), got success")
+		}
+		if strings.Contains(errOut, "unknown flag") {
+			t.Fatalf("rerun --failed-only failed at flag parsing: %s", errOut)
+		}
+		_, errOut, err = runFjFull(t, binary, "actions", "rerun", "1", "--job", "999999", "-r", ownerRepo)
+		if err == nil {
+			t.Fatalf("expected not-found error for nonexistent job, got success")
+		}
+		if strings.Contains(errOut, "unknown flag") {
+			t.Fatalf("rerun --job failed at flag parsing: %s", errOut)
+		}
 		_, errOut, err = runFjFull(t, binary, "actions", "jobs", "1", "--run-id", "-r", ownerRepo)
 		if err == nil {
 			t.Fatalf("expected not-found error for nonexistent raw run id, got success")
