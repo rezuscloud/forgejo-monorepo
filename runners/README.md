@@ -12,7 +12,7 @@ build action, so no macOS assets exist at any upstream version.
 | Platform | Deployment | Labels (schema) | Owner |
 |---|---|---|---|
 | linux (k8s) | `k8s-iac/modules/codeberg-runner` — wrenix chart + DinD | `<name>:docker://<image>` | k8s-iac repo |
-| **macOS (host)** | **`runners/macos/`** — this dir, user LaunchAgent | `<os>-<arch>:host` | this monorepo |
+| **macOS (host)** | **`sovereignai-iac` ansible role `forgejo_runner`** (fleet-managed; was `runners/macos/`) | `<os>-<arch>:host` | this monorepo |
 
 ## Binary source
 
@@ -47,17 +47,19 @@ macOS:
 - **Colima/Lima** — Linux containers on the Mac via a Lima VM; lets the same
   host additionally serve `docker://` labels (Woodpecker community pattern).
 
-## macOS host layout (per `runners/macos/`)
+## macOS host layout (managed by the fleet)
 
-| Path | Contents |
-|---|---|
-| `~/.local/bin/forgejo-runner` | binary (version-pinned, sha256-verified) |
-| `~/.local/share/forgejo-runner/` | `config.yml`, `.runner` (registration), cache, logs |
-| `~/Library/LaunchAgents/com.rezuscloud.forgejo-runner.plist` | user agent: RunAtLoad + KeepAlive |
-
-Registration uses a one-shot instance-level registration token
-(`fj api admin get-registration-token`); the resulting `.runner` file
-holds the per-runner secret. The registration token is never stored.
+The macOS runners are fleet-managed state: the `forgejo_runner` ansible
+role in `sovereignai-iac` (automations entry `forgejo-runner`, daily
+convergence) owns the binary (release-pinned, sha256-verified),
+`config.yml`, the registration, and the
+`com.rezuscloud.forgejo-runner` LaunchAgent (RunAtLoad + KeepAlive).
+Registration uses a one-shot instance token
+(`GET /api/v1/admin/actions/runners/registration-token`), provided via
+the automation environment only while a host is unregistered; the
+resulting `.runner` file holds the per-runner secret. The token is never
+stored. The install scripts that used to live in `runners/macos/` are
+retired (PR #152 arc follow-up).
 
 ## Bump-class matrix (in-repo contract)
 
