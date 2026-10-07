@@ -1275,6 +1275,219 @@ func CancelActionRun(ctx *context.APIContext) {
 }
 
 // ListActionRunJobs return a filtered list of jobs that belong to a single workflow run
+// mapRerunError translates the rerun service errors onto API statuses:
+// a disabled workflow is a policy refusal (403); an invalid or still-active
+// run/job is a state conflict (409); anything else is a server error.
+func mapRerunError(ctx *context.APIContext, err error) {
+	switch {
+	case errors.Is(err, actions_service.ErrRerunWorkflowDisabled):
+		ctx.Error(http.StatusForbidden, "Rerun", err)
+	case errors.Is(err, actions_service.ErrRerunWorkflowInvalid),
+		errors.Is(err, actions_service.ErrRerunWorkflowStillRunning),
+		errors.Is(err, actions_service.ErrRerunJobStillRunning):
+		ctx.Error(http.StatusConflict, "Rerun", err)
+	default:
+		ctx.Error(http.StatusInternalServerError, "Rerun", err)
+	}
+}
+
+// RerunActionRun reruns all jobs of a completed workflow run — the API
+// counterpart of the UI's Re-run button.
+func RerunActionRun(ctx *context.APIContext) {
+	// swagger:operation POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun repository RerunActionRun
+	// ---
+	// summary: Rerun all jobs of a workflow run
+	// description: >
+	//   Rerun every job of a completed workflow run as a new attempt. The run
+	//   must have finished (success, failure, cancelled or skipped); a run
+	//   that is still pending or running, or a workflow that has since been
+	//   disabled or become invalid, is refused. Responds with HTTP 204.
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: run_id
+	//   in: path
+	//   description: ID of the workflow run
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// responses:
+	//   "204":
+	//     description: Workflow run has been rerun
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "409":
+	//     "$ref": "#/responses/error"
+
+	run, err := actions_model.GetRunByID(ctx, ctx.ParamsInt64(":run_id"))
+	if err != nil {
+		if errors.Is(err, util.ErrNotExist) {
+			ctx.Error(http.StatusNotFound, "GetRunByID", err)
+		} else {
+			ctx.Error(http.StatusInternalServerError, "GetRunByID", err)
+		}
+		return
+	}
+	if ctx.Repo().Repository.ID != run.RepoID {
+		ctx.Error(http.StatusNotFound, "GetRunByID", util.ErrNotExist)
+		return
+	}
+
+	if _, err := actions_service.RerunAllJobs(ctx, run); err != nil {
+		mapRerunError(ctx, err)
+		return
+	}
+	ctx.Status(http.StatusNoContent)
+}
+
+// RerunFailedActionRun reruns only the failed jobs of a completed workflow
+// run — the API counterpart of the UI's Re-run failed jobs button.
+func RerunFailedActionRun(ctx *context.APIContext) {
+	// swagger:operation POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun-failed repository RerunFailedActionRun
+	// ---
+	// summary: Rerun the failed jobs of a workflow run
+	// description: >
+	//   Rerun only the jobs of a completed workflow run that ended in failure.
+	//   A run without failed jobs is refused with HTTP 409 rather than
+	//   silently re-firing nothing. Responds with HTTP 204.
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: run_id
+	//   in: path
+	//   description: ID of the workflow run
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// responses:
+	//   "204":
+	//     description: Failed jobs have been rerun
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "409":
+	//     "$ref": "#/responses/error"
+
+	run, err := actions_model.GetRunByID(ctx, ctx.ParamsInt64(":run_id"))
+	if err != nil {
+		if errors.Is(err, util.ErrNotExist) {
+			ctx.Error(http.StatusNotFound, "GetRunByID", err)
+		} else {
+			ctx.Error(http.StatusInternalServerError, "GetRunByID", err)
+		}
+		return
+	}
+	if ctx.Repo().Repository.ID != run.RepoID {
+		ctx.Error(http.StatusNotFound, "GetRunByID", util.ErrNotExist)
+		return
+	}
+
+	jobs, err := actions_model.GetRunJobsByRunID(ctx, run.ID)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "GetRunJobsByRunID", err)
+		return
+	}
+	failed := 0
+	for _, job := range jobs {
+		if job.Status != actions_model.StatusFailure {
+			continue
+		}
+		failed++
+		if _, err := actions_service.RerunJob(ctx, job); err != nil {
+			mapRerunError(ctx, err)
+			return
+		}
+	}
+	if failed == 0 {
+		ctx.Error(http.StatusConflict, "RerunFailed", errors.New("no failed jobs to rerun"))
+		return
+	}
+	ctx.Status(http.StatusNoContent)
+}
+
+// RerunActionJob reruns a single job (and its dependents) of a completed
+// workflow run.
+func RerunActionJob(ctx *context.APIContext) {
+	// swagger:operation POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun repository RerunActionJob
+	// ---
+	// summary: Rerun a single job of a workflow run
+	// description: >
+	//   Rerun the given job and its dependent jobs as a new attempt. The job
+	//   must belong to a completed run and must itself have finished; a job
+	//   that is still running is refused. Responds with HTTP 204.
+	// produces:
+	// - application/json
+	// parameters:
+	// - name: owner
+	//   in: path
+	//   description: owner of the repo
+	//   type: string
+	//   required: true
+	// - name: repo
+	//   in: path
+	//   description: name of the repo
+	//   type: string
+	//   required: true
+	// - name: job_id
+	//   in: path
+	//   description: ID of the job
+	//   type: integer
+	//   format: int64
+	//   required: true
+	// responses:
+	//   "204":
+	//     description: Job has been rerun
+	//   "403":
+	//     "$ref": "#/responses/forbidden"
+	//   "404":
+	//     "$ref": "#/responses/notFound"
+	//   "409":
+	//     "$ref": "#/responses/error"
+
+	job, err := actions_model.GetRunJobByID(ctx, ctx.ParamsInt64(":job_id"))
+	if err != nil {
+		if errors.Is(err, util.ErrNotExist) {
+			ctx.Error(http.StatusNotFound, "GetRunJobByID", err)
+		} else {
+			ctx.Error(http.StatusInternalServerError, "GetRunJobByID", err)
+		}
+		return
+	}
+	if job.RepoID != ctx.Repo().Repository.ID {
+		ctx.Error(http.StatusNotFound, "GetRunJobByID", util.ErrNotExist)
+		return
+	}
+
+	if _, err := actions_service.RerunJob(ctx, job); err != nil {
+		mapRerunError(ctx, err)
+		return
+	}
+	ctx.Status(http.StatusNoContent)
+}
+
 func ListActionRunJobs(ctx *context.APIContext) {
 	// swagger:operation GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs repository ListActionRunJobs
 	// ---

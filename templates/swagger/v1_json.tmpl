@@ -5934,6 +5934,57 @@
         }
       }
     },
+    "/repos/{owner}/{repo}/actions/jobs/{job_id}/rerun": {
+      "post": {
+        "description": "Rerun the given job and its dependent jobs as a new attempt. The job must belong to a completed run and must itself have finished; a job that is still running is refused. Responds with HTTP 204.\n",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Rerun a single job of a workflow run",
+        "operationId": "RerunActionJob",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "ID of the job",
+            "name": "job_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Job has been rerun"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
     "/repos/{owner}/{repo}/actions/runners": {
       "get": {
         "produces": [
@@ -6321,7 +6372,7 @@
           "repository"
         ],
         "summary": "Get an action run by its index in the repository",
-        "operationId": "ActionRunByIndex",
+        "operationId": "ActionRun",
         "parameters": [
           {
             "type": "string",
@@ -6671,6 +6722,108 @@
           },
           "404": {
             "$ref": "#/responses/notFound"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/actions/runs/{run_id}/rerun": {
+      "post": {
+        "description": "Rerun every job of a completed workflow run as a new attempt. The run must have finished (success, failure, cancelled or skipped); a run that is still pending or running, or a workflow that has since been disabled or become invalid, is refused. Responds with HTTP 204.\n",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Rerun all jobs of a workflow run",
+        "operationId": "RerunActionRun",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "ID of the workflow run",
+            "name": "run_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Workflow run has been rerun"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/actions/runs/{run_id}/rerun-failed": {
+      "post": {
+        "description": "Rerun only the jobs of a completed workflow run that ended in failure. A run without failed jobs is refused with HTTP 409 rather than silently re-firing nothing. Responds with HTTP 204.\n",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "repository"
+        ],
+        "summary": "Rerun the failed jobs of a workflow run",
+        "operationId": "RerunFailedActionRun",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "owner of the repo",
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "string",
+            "description": "name of the repo",
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "type": "integer",
+            "format": "int64",
+            "description": "ID of the workflow run",
+            "name": "run_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Failed jobs have been rerun"
+          },
+          "403": {
+            "$ref": "#/responses/forbidden"
+          },
+          "404": {
+            "$ref": "#/responses/notFound"
+          },
+          "409": {
+            "$ref": "#/responses/error"
           }
         }
       }
@@ -25529,20 +25682,6 @@
       },
       "x-go-package": "forgejo.org/modules/structs"
     },
-    "CreatePullReviewCommentReplyOptions": {
-      "description": "CreatePullReviewCommentReplyOptions are options to reply to a pull review comment",
-      "type": "object",
-      "required": [
-        "body"
-      ],
-      "properties": {
-        "body": {
-          "type": "string",
-          "x-go-name": "Body"
-        }
-      },
-      "x-go-package": "forgejo.org/modules/structs"
-    },
     "CreatePullReviewOptions": {
       "description": "CreatePullReviewOptions are options to create a pull review",
       "type": "object",
@@ -26168,59 +26307,6 @@
         "priors": {
           "type": "boolean",
           "x-go-name": "Priors"
-        }
-      },
-      "x-go-package": "forgejo.org/modules/structs"
-    },
-    "ActionWorkflow": {
-      "description": "ActionWorkflow represents a workflow file discoverable in a repository",
-      "type": "object",
-      "properties": {
-        "filename": {
-          "type": "string",
-          "x-go-name": "Filename",
-          "description": "the workflow file name — the key DispatchWorkflow takes"
-        },
-        "name": {
-          "type": "string",
-          "x-go-name": "Name",
-          "description": "the workflow's `name:` field (falls back to the filename)"
-        },
-        "path": {
-          "type": "string",
-          "x-go-name": "Path",
-          "description": "the workflow file's path in the repository"
-        },
-        "state": {
-          "type": "string",
-          "x-go-name": "State",
-          "description": "workflows are always active in Forgejo (GitHub-compat field)"
-        },
-        "html_url": {
-          "type": "string",
-          "x-go-name": "HTMLURL",
-          "description": "the Actions web URL filtered to this workflow"
-        }
-      },
-      "x-go-package": "forgejo.org/modules/structs"
-    },
-    "ListActionWorkflowsResponse": {
-      "description": "ListActionWorkflowsResponse is a paginated-shaped list of a repository's workflows",
-      "type": "object",
-      "properties": {
-        "total_count": {
-          "type": "integer",
-          "format": "int64",
-          "x-go-name": "TotalCount",
-          "description": "total number of workflows"
-        },
-        "workflows": {
-          "type": "array",
-          "x-go-name": "Workflows",
-          "items": {
-            "$ref": "#/definitions/ActionWorkflow"
-          },
-          "description": "the workflows at the default branch"
         }
       },
       "x-go-package": "forgejo.org/modules/structs"
@@ -32003,12 +32089,6 @@
           "format": "int64",
           "description": "The total number of deploy keys"
         }
-      }
-    },
-    "ListActionWorkflowsResponse": {
-      "description": "ListActionWorkflowsResponse",
-      "schema": {
-        "$ref": "#/definitions/ListActionWorkflowsResponse"
       }
     },
     "DispatchWorkflowRun": {

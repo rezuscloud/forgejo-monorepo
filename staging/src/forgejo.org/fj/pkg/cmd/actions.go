@@ -23,6 +23,7 @@ func newActionsCmd() *cobra.Command {
 	cmd.AddCommand(newActionsDispatchCmd())
 	cmd.AddCommand(newActionsWorkflowsCmd())
 	cmd.AddCommand(newActionsRunsCmd())
+	cmd.AddCommand(newActionsRerunCmd())
 	cmd.AddCommand(newActionsVariablesCmd())
 	cmd.AddCommand(newActionsSecretsCmd())
 	return cmd
@@ -306,6 +307,64 @@ func newActionsRunsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&ref, "ref", "", "filter by ref (branch)")
 	cmd.Flags().StringVar(&workflowID, "workflow-id", "", "filter by workflow id")
 	cmd.Flags().Int64Var(&runNumber, "run-number", 0, "filter by run number")
+	return cmd
+}
+
+// newActionsRerunCmd wraps the rerun API endpoints (#153): all jobs of a
+// run, only its failed jobs, or a single job (and its dependents).
+func newActionsRerunCmd() *cobra.Command {
+	var (
+		rawID      bool
+		failedOnly bool
+		jobID      int64
+	)
+	cmd := &cobra.Command{
+		Use:   "rerun <RUN>",
+		Short: "Re-run a completed workflow run",
+		Long: `RUN is the run's index — the number the web UI shows and 'fj actions runs'
+prints (index_in_repo). Pass --run-id to use the run's raw database id.
+
+By default every job of the run is re-run as a new attempt. --failed-only
+re-runs only the jobs that failed. --job <ID> re-runs one job (and its
+dependents) instead of the whole run; RUN is still required to select the
+run unless --job addresses it directly via its database id.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, owner, repo, err := resolveClient(cmd)
+			if err != nil {
+				return err
+			}
+			if jobID != 0 {
+				if failedOnly {
+					return fmt.Errorf("--failed-only and --job are mutually exclusive")
+				}
+				if _, err := c.Repo.RerunActionJob(context.Background(), owner, repo, jobID); err != nil {
+					return err
+				}
+				fmt.Printf("rerun queued for job %d\n", jobID)
+				return nil
+			}
+			runID, err := resolveRunRef(c, owner, repo, args[0], rawID)
+			if err != nil {
+				return err
+			}
+			if failedOnly {
+				if _, err := c.Repo.RerunFailedActionRun(context.Background(), owner, repo, runID); err != nil {
+					return err
+				}
+				fmt.Printf("rerun queued for failed jobs of run %d\n", runID)
+				return nil
+			}
+			if _, err := c.Repo.RerunActionRun(context.Background(), owner, repo, runID); err != nil {
+				return err
+			}
+			fmt.Printf("rerun queued for run %d\n", runID)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&rawID, "run-id", false, "treat RUN as the run's raw database id instead of its index")
+	cmd.Flags().BoolVar(&failedOnly, "failed-only", false, "re-run only the failed jobs of the run")
+	cmd.Flags().Int64Var(&jobID, "job", 0, "re-run a single job (and its dependents) by job id instead of the whole run")
 	return cmd
 }
 
