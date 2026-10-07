@@ -300,11 +300,12 @@ jobs:
             --app-version '${{ needs.prepare.outputs.release_version }}' \
             --destination dist
       - name: Push chart to GHCR (Helm OCI)
-        # Best-effort: the ghcr.io/rezuscloud/charts OCI package must exist
-        # (created/linked by an org owner) for the GITHUB_TOKEN to push here.
-        # The packaged chart tgz is still attached to the GitHub Release below
-        # regardless, so a 403 here must not block the release.
-        continue-on-error: true
+        # The chart package is release-critical (prod Flux advances on it):
+        # a failed push must fail the release, never rot silently. Pushing a
+        # NEW package name with GITHUB_TOKEN auto-links it to this repo
+        # (forgejo-monorepo since PR #152); pushing to a manually-created,
+        # unlinked package 403s — that is how charts silently stopped
+        # publishing between 18.0.0-rc.1 and the rename.
         run: |
           echo '${{ secrets.GITHUB_TOKEN }}' | helm registry login ghcr.io -u '${{ github.actor }}' --password-stdin
           helm push dist/${{ needs.prepare.outputs.chart_archive }} '${{ needs.prepare.outputs.chart_repository }}'
