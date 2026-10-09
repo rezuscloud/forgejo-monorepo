@@ -3726,7 +3726,7 @@ func TestGenerated_Org(t *testing.T) {
 	})
 }
 
-// TestGenerated_Repo tests all 270 auto-generated repo commands.
+// TestGenerated_Repo tests all 273 auto-generated repo commands.
 func TestGenerated_Repo(t *testing.T) {
 	skipIfNoInstance(t)
 	binary := buildFjBinary(t)
@@ -4100,6 +4100,48 @@ func TestGenerated_Repo(t *testing.T) {
 			if e := json.Unmarshal(trimmed, &v); e != nil {
 				t.Errorf("invalid JSON: %v\n%s", e, string(trimmed[:min(len(trimmed),200)]))
 			}
+		}
+	})
+	t.Run("RerunActionJob", func(t *testing.T) {
+		args := []string{"api", "repo", "rerun-action-job",
+			"--owner", testUser(),
+			"--repo", testRepo,
+			"--job-id", "1",
+		}
+		out, err := runFj(t, binary, args...)
+		if err != nil {
+			// Write commands: accept any HTTP error (404/403/409/422)
+			if isAcceptableError(out) { t.Skip("endpoint exists, write skipped (no body)") }
+			t.Errorf("%v\n%s", err, out)
+			return
+		}
+	})
+	t.Run("RerunActionRun", func(t *testing.T) {
+		args := []string{"api", "repo", "rerun-action-run",
+			"--owner", testUser(),
+			"--repo", testRepo,
+			"--run-id", "1",
+		}
+		out, err := runFj(t, binary, args...)
+		if err != nil {
+			// Write commands: accept any HTTP error (404/403/409/422)
+			if isAcceptableError(out) { t.Skip("endpoint exists, write skipped (no body)") }
+			t.Errorf("%v\n%s", err, out)
+			return
+		}
+	})
+	t.Run("RerunFailedActionRun", func(t *testing.T) {
+		args := []string{"api", "repo", "rerun-failed-action-run",
+			"--owner", testUser(),
+			"--repo", testRepo,
+			"--run-id", "1",
+		}
+		out, err := runFj(t, binary, args...)
+		if err != nil {
+			// Write commands: accept any HTTP error (404/403/409/422)
+			if isAcceptableError(out) { t.Skip("endpoint exists, write skipped (no body)") }
+			t.Errorf("%v\n%s", err, out)
+			return
 		}
 	})
 	t.Run("acceptRepoTransfer", func(t *testing.T) {
