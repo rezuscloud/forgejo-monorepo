@@ -949,6 +949,8 @@
 	"members.invite_team_member": "Invite to team",
 	"members.user": "User",
 	"members.user_already_member": "This user is already a member of the organization.",
+	"members.user_already_invited_to_org": "This user is already invited to the organization.",
+	"members.user_already_invited_to_team": "This user is already invited to the team.",
 	"members.no_team_selected": "Organization members must belong to at least one team.",
 	"pulls.status_checks.skipped": "Some checks were skipped",
 	"pulls.manual_merge.helper": "Manual merge helper",
